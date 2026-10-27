@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Departments · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="toolbar"><div class="spacer"></div><button class="btn btn-primary" id="addBtn"></button></div>
+      <div class="grid three" id="cards"></div>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      if (!EMS.shell("departments", "Departments", "Organise your teams")) return;
+      var I = EMS.icon, esc = EMS.esc;
+      document.getElementById("addBtn").innerHTML = I("plus") + "Add department";
+
+      function render() {
+        var db = EMS.db;
+        document.getElementById("cards").innerHTML = db.departments.map(function (d) {
+          var staff = db.employees.filter(function (e) { return e.dept === d.id && e.status === "Active"; });
+          var cost = staff.reduce(function (s, e) { return s + (+e.basic || 0) + (+e.hra || 0) + (+e.allowance || 0); }, 0);
+          return '<div class="card dept-card"><div class="card-head" style="margin-bottom:0"><div><h3>' + esc(d.name) + '</h3><p class="note">' + esc(d.description || "") + "</p></div>" +
+            '<div class="actions"><button class="icon-btn" data-edit="' + d.id + '" title="Edit">' + I("edit") + '</button><button class="icon-btn danger" data-del="' + d.id + '" title="Delete">' + I("trash") + "</button></div></div>" +
+            '<div class="meta"><div><small>Employees</small><b>' + staff.length + "</b></div><div><small>Monthly cost</small><b>" + EMS.inr(cost) + "</b></div></div>" +
+            '<div class="list-item" style="padding:0;border:0"><div class="avatar sm">' + esc(EMS.initials(d.head || "?")) + '</div><div class="grow"><small>Department head</small><b>' + esc(d.head || "Not assigned") + "</b></div></div></div>";
+        }).join("") || '<div class="card empty">No departments yet. Add your first one.</div>';
+      }
+
+      function openForm(id) {
+        var db = EMS.db, d = id ? EMS.dept(id) : { name: "", head: "", description: "" };
+        var heads = db.employees.map(function (e) { return '<option' + (e.name === d.head ? " selected" : "") + ">" + esc(e.name) + "</option>"; }).join("");
+        EMS.modal({
+          title: id ? "Edit department" : "Add department",
+          body: '<form id="dForm" class="form-grid">' +
+            '<label class="field full">Department name *<input class="input" name="name" required value="' + esc(d.name) + '" /></label>' +
+            '<label class="field full">Department head<select class="select" name="head"><option value="">Not assigned</option>' + heads + "</select></label>" +
+            '<label class="field full">Description<input class="input" name="description" value="' + esc(d.description) + '" /></label></form>',
+          footer: '<button class="btn btn-ghost" data-close type="button">Cancel</button><button class="btn btn-primary" type="submit" form="dForm">Save</button>',
+        });
+        document.getElementById("dForm").addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          if (!this.reportValidity()) return;
+          var f = EMS.formData(this);
+          if (id) Object.assign(d, f); else db.departments.push(Object.assign({ id: EMS.uid("D") }, f));
+          EMS.save(); EMS.closeModal(); render(); EMS.toast("Department saved");
+        });
+      }
+
+      document.getElementById("cards").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button"); if (!b) return;
+        if (b.dataset.edit) openForm(b.dataset.edit);
+        if (b.dataset.del) {
+          var db = EMS.db, n = db.employees.filter(function (e) { return e.dept === b.dataset.del; }).length;
+          if (n) { EMS.toast("Move its " + n + " employee(s) to another department first", "error"); return; }
+          if (confirm("Delete this department?")) {
+            db.departments = db.departments.filter(function (d) { return d.id !== b.dataset.del; });
+            EMS.save(); render(); EMS.toast("Department deleted");
+          }
+        }
+      });
+      document.getElementById("addBtn").onclick = function () { openForm(); };
+      render();
+    })();
+  </script>
+</body>
+</html>

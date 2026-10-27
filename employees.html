@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Employees · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="toolbar">
+        <div class="search" id="searchBox"></div>
+        <select class="select" id="fDept"></select>
+        <select class="select" id="fStatus">
+          <option value="">All status</option>
+          <option>Active</option>
+          <option>Inactive</option>
+        </select>
+        <button class="btn btn-outline" id="exportBtn"></button>
+        <button class="btn btn-primary" id="addBtn"></button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Employee</th><th>Department</th><th>Phone</th><th>Joined</th><th class="num">Monthly gross</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="note" id="count" style="margin-top:10px"></p>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      if (!EMS.shell("employees", "Employees", "Add, edit and manage staff records")) return;
+      var I = EMS.icon, esc = EMS.esc;
+      document.getElementById("searchBox").innerHTML = I("search") + '<input class="input" id="q" placeholder="Search name, code, phone…" />';
+      document.getElementById("fDept").innerHTML = EMS.deptOptions("", true);
+      document.getElementById("addBtn").innerHTML = I("plus") + "Add employee";
+      document.getElementById("exportBtn").innerHTML = I("download") + "Export";
+
+      function render() {
+        var db = EMS.db;
+        var q = document.getElementById("q").value.toLowerCase();
+        var fd = document.getElementById("fDept").value, fs = document.getElementById("fStatus").value;
+        var list = db.employees.filter(function (e) {
+          return (!fd || e.dept === fd) && (!fs || e.status === fs) &&
+            (!q || [e.name, e.code, e.phone, e.email, e.designation].join(" ").toLowerCase().indexOf(q) > -1);
+        });
+        document.getElementById("rows").innerHTML = list.map(function (e) {
+          var gross = (+e.basic || 0) + (+e.hra || 0) + (+e.allowance || 0);
+          return "<tr><td>" + EMS.personCell(e) + "</td><td>" + esc(EMS.deptName(e.dept)) + "</td><td>" + esc(e.phone) + "</td><td>" + EMS.fmtDate(e.joinDate) +
+            '</td><td class="num">' + EMS.inr(gross) + "</td><td>" + EMS.badge(e.status) + '</td><td><div class="actions">' +
+            '<button class="icon-btn" data-view="' + e.id + '" title="View">' + I("eye") + "</button>" +
+            '<button class="icon-btn" data-edit="' + e.id + '" title="Edit">' + I("edit") + "</button>" +
+            '<button class="icon-btn danger" data-del="' + e.id + '" title="Delete">' + I("trash") + "</button></div></td></tr>";
+        }).join("") || '<tr><td colspan="7"><div class="empty">No employees match your search.</div></td></tr>';
+        document.getElementById("count").textContent = "Showing " + list.length + " of " + db.employees.length + " employees";
+      }
+
+      function form(e) {
+        e = e || { status: "Active", gender: "Male", joinDate: EMS.today(), dept: EMS.db.departments[0] && EMS.db.departments[0].id };
+        function v(k) { return esc(e[k] == null ? "" : e[k]); }
+        function opt(list, cur) { return list.map(function (x) { return "<option" + (x === cur ? " selected" : "") + ">" + x + "</option>"; }).join(""); }
+        return '<form id="empForm" class="form-grid">' +
+          '<div class="form-section">Personal details</div>' +
+          '<label class="field">Full name *<input class="input" name="name" required value="' + v("name") + '" /></label>' +
+          '<label class="field">Gender<select class="select" name="gender">' + opt(["Male", "Female", "Other"], e.gender) + "</select></label>" +
+          '<label class="field">Phone *<input class="input" name="phone" required inputmode="tel" value="' + v("phone") + '" /></label>' +
+          '<label class="field">Email<input class="input" type="email" name="email" value="' + v("email") + '" /></label>' +
+          '<label class="field">Date of birth<input class="input" type="date" name="dob" value="' + v("dob") + '" /></label>' +
+          '<label class="field">PAN<input class="input" name="pan" value="' + v("pan") + '" style="text-transform:uppercase" /></label>' +
+          '<label class="field full">Address<input class="input" name="address" value="' + v("address") + '" /></label>' +
+          '<div class="form-section">Job details</div>' +
+          '<label class="field">Department<select class="select" name="dept">' + EMS.deptOptions(e.dept) + "</select></label>" +
+          '<label class="field">Designation *<input class="input" name="designation" required value="' + v("designation") + '" /></label>' +
+          '<label class="field">Joining date<input class="input" type="date" name="joinDate" value="' + v("joinDate") + '" /></label>' +
+          '<label class="field">Status<select class="select" name="status">' + opt(["Active", "Inactive"], e.status) + "</select></label>" +
+          '<div class="form-section">Monthly salary structure (₹)</div>' +
+          '<label class="field">Basic *<input class="input" type="number" min="0" name="basic" required value="' + v("basic") + '" /></label>' +
+          '<label class="field">HRA<input class="input" type="number" min="0" name="hra" value="' + v("hra") + '" /></label>' +
+          '<label class="field">Other allowance<input class="input" type="number" min="0" name="allowance" value="' + v("allowance") + '" /></label>' +
+          '<label class="field">Bank A/c no.<input class="input" name="bank" value="' + v("bank") + '" /></label>' +
+          '<label class="field">IFSC<input class="input" name="ifsc" value="' + v("ifsc") + '" style="text-transform:uppercase" /></label>' +
+          "</form>";
+      }
+
+      function openForm(id) {
+        var e = id ? EMS.emp(id) : null;
+        EMS.modal({
+          title: e ? "Edit " + e.name : "Add employee", wide: true, body: form(e),
+          footer: '<button class="btn btn-ghost" data-close type="button">Cancel</button><button class="btn btn-primary" type="submit" form="empForm">' + (e ? "Save changes" : "Add employee") + "</button>",
+        });
+        document.getElementById("empForm").addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          if (!this.reportValidity()) return;
+          var d = EMS.formData(this);
+          ["basic", "hra", "allowance"].forEach(function (k) { d[k] = +d[k] || 0; });
+          d.pan = (d.pan || "").toUpperCase(); d.ifsc = (d.ifsc || "").toUpperCase();
+          var db = EMS.db;
+          if (e) { Object.assign(e, d); }
+          else {
+            var maxCode = db.employees.reduce(function (m, x) { return Math.max(m, parseInt(String(x.code).replace(/\D/g, ""), 10) || 1000); }, 1000);
+            db.employees.push(Object.assign({ id: EMS.uid("E"), code: "SB" + (maxCode + 1) }, d));
+          }
+          EMS.save(); EMS.closeModal(); render();
+          EMS.toast(e ? "Employee updated" : "Employee added");
+        });
+      }
+
+      function view(id) {
+        var e = EMS.emp(id), gross = (+e.basic || 0) + (+e.hra || 0) + (+e.allowance || 0);
+        function row(l, v) { return "<div><small>" + l + "</small><span>" + (v ? esc(v) : "—") + "</span></div>"; }
+        EMS.modal({
+          title: "Employee profile", wide: true,
+          body: '<div class="profile-head"><div class="avatar">' + esc(EMS.initials(e.name)) + '</div><div><h3>' + esc(e.name) + '</h3><span class="note">' + esc(e.code + " · " + e.designation) + "</span></div><div style=\"margin-left:auto\">" + EMS.badge(e.status) + "</div></div>" +
+            '<div class="dl">' + row("Department", EMS.deptName(e.dept)) + row("Joining date", EMS.fmtDate(e.joinDate)) + row("Phone", e.phone) + row("Email", e.email) +
+            row("Gender", e.gender) + row("Date of birth", e.dob ? EMS.fmtDate(e.dob) : "") + row("PAN", e.pan) + row("Address", e.address) +
+            row("Bank A/c", e.bank) + row("IFSC", e.ifsc) + row("Basic", EMS.inr(e.basic)) + row("HRA", EMS.inr(e.hra)) + row("Allowance", EMS.inr(e.allowance)) + row("Monthly gross", EMS.inr(gross)) + "</div>",
+          footer: '<button class="btn btn-ghost" data-close type="button">Close</button><button class="btn btn-primary" type="button" id="toEdit">' + I("edit") + "Edit</button>",
+        });
+        document.getElementById("toEdit").onclick = function () { openForm(id); };
+      }
+
+      document.getElementById("rows").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button"); if (!b) return;
+        if (b.dataset.view) view(b.dataset.view);
+        if (b.dataset.edit) openForm(b.dataset.edit);
+        if (b.dataset.del) {
+          var e = EMS.emp(b.dataset.del);
+          if (confirm("Delete " + e.name + "? This also removes their leave records.")) {
+            var db = EMS.db;
+            db.employees = db.employees.filter(function (x) { return x.id !== e.id; });
+            db.leaves = db.leaves.filter(function (l) { return l.empId !== e.id; });
+            EMS.save(); render(); EMS.toast("Employee deleted");
+          }
+        }
+      });
+      document.getElementById("addBtn").onclick = function () { openForm(); };
+      document.getElementById("exportBtn").onclick = function () {
+        var rows = [["Code", "Name", "Department", "Designation", "Phone", "Email", "Joining date", "Basic", "HRA", "Allowance", "Status"]];
+        EMS.db.employees.forEach(function (e) { rows.push([e.code, e.name, EMS.deptName(e.dept), e.designation, e.phone, e.email, e.joinDate, e.basic, e.hra, e.allowance, e.status]); });
+        EMS.downloadFile("employees.csv", EMS.toCSV(rows), "text/csv");
+      };
+      ["q", "fDept", "fStatus"].forEach(function (id) { document.getElementById(id).addEventListener("input", render); });
+      render();
+    })();
+  </script>
+</body>
+</html>

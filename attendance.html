@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Attendance · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="card">
+        <div class="card-head">
+          <div><h2>Daily attendance</h2><p>P = Present · A = Absent · H = Half day · L = Leave</p></div>
+          <div class="toolbar" style="margin:0">
+            <input class="input" type="date" id="date" />
+            <button class="btn btn-outline" id="allP" type="button">Mark all present</button>
+            <button class="btn btn-primary" id="saveBtn" type="button">Save attendance</button>
+          </div>
+        </div>
+        <div class="toolbar" id="summary"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Employee</th><th>Department</th><th>Status</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <div class="card-head">
+          <div><h2>Monthly summary</h2><p>Absent and half days reduce salary (loss of pay)</p></div>
+          <select class="select" id="month" style="width:auto"></select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Employee</th><th class="num">Present</th><th class="num">Half day</th><th class="num">Leave</th><th class="num">Absent</th><th class="num">Loss-of-pay days</th></tr></thead>
+            <tbody id="monthRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      if (!EMS.shell("attendance", "Attendance", "Mark daily attendance for your team")) return;
+      var esc = EMS.esc;
+      var dateEl = document.getElementById("date");
+      dateEl.value = EMS.today();
+      dateEl.max = EMS.today();
+
+      function active() { return EMS.db.employees.filter(function (e) { return e.status === "Active"; }); }
+
+      function renderDay() {
+        var d = dateEl.value, map = EMS.db.attendance[d] || {};
+        var isSunday = EMS.parseDate(d).getDay() === 0;
+        document.getElementById("rows").innerHTML = active().map(function (e) {
+          var cur = map[e.id] || (EMS.onLeave(e.id, d) ? "L" : "");
+          var seg = ["P", "A", "H", "L"].map(function (s) {
+            return '<label><input type="radio" name="a_' + e.id + '" value="' + s + '"' + (cur === s ? " checked" : "") + ' /><span class="' + s + '">' + s + "</span></label>";
+          }).join("");
+          return "<tr><td>" + EMS.personCell(e) + "</td><td>" + esc(EMS.deptName(e.dept)) + '</td><td><div class="seg">' + seg + "</div></td></tr>";
+        }).join("") || '<tr><td colspan="3"><div class="empty">No active employees.</div></td></tr>';
+        if (isSunday) EMS.toast("Selected date is a Sunday", "error");
+        summary();
+      }
+
+      function summary() {
+        var c = { P: 0, A: 0, H: 0, L: 0 }, un = 0;
+        active().forEach(function (e) {
+          var r = document.querySelector('input[name="a_' + e.id + '"]:checked');
+          if (r) c[r.value]++; else un++;
+        });
+        document.getElementById("summary").innerHTML =
+          '<span class="chip">Present <b>' + c.P + '</b></span><span class="chip">Absent <b>' + c.A + '</b></span><span class="chip">Half day <b>' + c.H +
+          '</b></span><span class="chip">Leave <b>' + c.L + '</b></span><span class="chip">Not marked <b>' + un + "</b></span>";
+      }
+
+      function months() {
+        var out = [], d = new Date(); d.setDate(1);
+        for (var i = 0; i < 12; i++) { out.push(EMS.ymd(d).slice(0, 7)); d.setMonth(d.getMonth() - 1); }
+        return out;
+      }
+      var monthEl = document.getElementById("month");
+      monthEl.innerHTML = months().map(function (m) { return '<option value="' + m + '">' + EMS.fmtMonth(m) + "</option>"; }).join("");
+
+      function renderMonth() {
+        var m = monthEl.value;
+        document.getElementById("monthRows").innerHTML = active().map(function (e) {
+          var s = EMS.salaryFor(e, m);
+          return "<tr><td>" + EMS.personCell(e) + '</td><td class="num">' + s.present + '</td><td class="num">' + s.half + '</td><td class="num">' + s.leave +
+            '</td><td class="num">' + s.absent + '</td><td class="num"><b>' + s.lopDays + "</b></td></tr>";
+        }).join("");
+      }
+
+      document.getElementById("rows").addEventListener("change", summary);
+      dateEl.addEventListener("change", renderDay);
+      monthEl.addEventListener("change", renderMonth);
+      document.getElementById("allP").onclick = function () {
+        document.querySelectorAll('#rows input[value="P"]').forEach(function (r) {
+          var name = r.name, cur = document.querySelector('input[name="' + name + '"]:checked');
+          if (!cur || cur.value !== "L") r.checked = true;
+        });
+        summary();
+      };
+      document.getElementById("saveBtn").onclick = function () {
+        var d = dateEl.value; if (!d) return;
+        var map = {};
+        active().forEach(function (e) {
+          var r = document.querySelector('input[name="a_' + e.id + '"]:checked');
+          if (r) map[e.id] = r.value;
+        });
+        var db = EMS.db;
+        db.attendance[d] = Object.assign(db.attendance[d] || {}, map);
+        EMS.save(); renderMonth();
+        EMS.toast("Attendance saved for " + EMS.fmtDate(d));
+      };
+
+      renderDay(); renderMonth();
+    })();
+  </script>
+</body>
+</html>

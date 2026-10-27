@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Leave · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="grid stats" id="stats"></div>
+      <div class="toolbar">
+        <select class="select" id="fStatus">
+          <option value="">All requests</option>
+          <option>Pending</option>
+          <option>Approved</option>
+          <option>Rejected</option>
+        </select>
+        <div class="spacer"></div>
+        <button class="btn btn-primary" id="addBtn"></button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Employee</th><th>Leave type</th><th>Dates</th><th class="num">Days</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="note" style="margin-top:10px">Approving a request marks those days as Leave in attendance. Unpaid leave is counted as absent (loss of pay). Sundays are not counted.</p>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      if (!EMS.shell("leave", "Leave Management", "Apply, approve and track staff leave")) return;
+      var I = EMS.icon, esc = EMS.esc;
+      document.getElementById("addBtn").innerHTML = I("plus") + "New leave request";
+      var TYPES = ["Casual Leave", "Sick Leave", "Earned Leave", "Unpaid Leave"];
+
+      function render() {
+        var db = EMS.db, fs = document.getElementById("fStatus").value;
+        var c = { Pending: 0, Approved: 0, Rejected: 0 };
+        db.leaves.forEach(function (l) { c[l.status]++; });
+        var onToday = db.employees.filter(function (e) { return EMS.onLeave(e.id, EMS.today()); }).length;
+        document.getElementById("stats").innerHTML =
+          EMS.statCard("Pending", c.Pending, "Needs your action", "clock", "tone-saffron") +
+          EMS.statCard("Approved", c.Approved, "All time", "checkCircle", "tone-green") +
+          EMS.statCard("Rejected", c.Rejected, "All time", "x", "tone-maroon") +
+          EMS.statCard("On leave today", onToday, EMS.fmtDate(EMS.today()), "leave", "tone-blue");
+
+        var list = db.leaves.filter(function (l) { return !fs || l.status === fs; })
+          .sort(function (a, b) { return a.status === "Pending" && b.status !== "Pending" ? -1 : b.status === "Pending" && a.status !== "Pending" ? 1 : a.from < b.from ? 1 : -1; });
+        document.getElementById("rows").innerHTML = list.map(function (l) {
+          var e = EMS.emp(l.empId), days = EMS.daysBetween(l.from, l.to).length;
+          var acts = l.status === "Pending"
+            ? '<button class="btn btn-success btn-sm" data-ok="' + l.id + '">' + I("check") + 'Approve</button><button class="btn btn-danger btn-sm" data-no="' + l.id + '">Reject</button>'
+            : "";
+          return "<tr><td>" + EMS.personCell(e) + "</td><td>" + esc(l.type) + "</td><td>" + EMS.fmtDate(l.from) + (l.to !== l.from ? " → " + EMS.fmtDate(l.to) : "") +
+            '</td><td class="num">' + days + '</td><td style="white-space:normal;min-width:160px">' + esc(l.reason || "—") + "</td><td>" + EMS.badge(l.status) +
+            '</td><td><div class="actions">' + acts + '<button class="icon-btn danger" data-del="' + l.id + '" title="Delete">' + I("trash") + "</button></div></td></tr>";
+        }).join("") || '<tr><td colspan="7"><div class="empty">No leave requests here.</div></td></tr>';
+      }
+
+      function openForm() {
+        var emps = EMS.db.employees.filter(function (e) { return e.status === "Active"; });
+        EMS.modal({
+          title: "New leave request",
+          body: '<form id="lvForm" class="form-grid">' +
+            '<label class="field full">Employee<select class="select" name="empId" required>' + emps.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name + " (" + e.code + ")") + "</option>"; }).join("") + "</select></label>" +
+            '<label class="field full">Leave type<select class="select" name="type">' + TYPES.map(function (t) { return "<option>" + t + "</option>"; }).join("") + "</select></label>" +
+            '<label class="field">From<input class="input" type="date" name="from" required value="' + EMS.today() + '" /></label>' +
+            '<label class="field">To<input class="input" type="date" name="to" required value="' + EMS.today() + '" /></label>' +
+            '<label class="field full">Reason<textarea class="input" name="reason" rows="3"></textarea></label>' +
+            '<p class="form-error full" id="lvErr"></p></form>',
+          footer: '<button class="btn btn-ghost" data-close type="button">Cancel</button><button class="btn btn-primary" type="submit" form="lvForm">Submit request</button>',
+        });
+        document.getElementById("lvForm").addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          var d = EMS.formData(this), err = document.getElementById("lvErr");
+          if (!d.from || !d.to || d.to < d.from) { err.textContent = "End date must be on or after the start date."; err.classList.add("show"); return; }
+          if (!EMS.daysBetween(d.from, d.to).length) { err.textContent = "Selected dates only include Sundays."; err.classList.add("show"); return; }
+          EMS.db.leaves.push(Object.assign({ id: EMS.uid("L"), status: "Pending", appliedOn: EMS.today() }, d));
+          EMS.save(); EMS.closeModal(); render(); EMS.toast("Leave request added");
+        });
+      }
+
+      function decide(id, status) {
+        var db = EMS.db, l = db.leaves.find(function (x) { return x.id === id; });
+        l.status = status; l.decidedOn = EMS.today();
+        if (status === "Approved") {
+          var mark = l.type === "Unpaid Leave" ? "A" : "L";
+          EMS.daysBetween(l.from, l.to).forEach(function (d) { db.attendance[d] = db.attendance[d] || {}; db.attendance[d][l.empId] = mark; });
+        }
+        EMS.save(); render(); EMS.toast("Leave " + status.toLowerCase());
+      }
+
+      document.getElementById("rows").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button"); if (!b) return;
+        if (b.dataset.ok) decide(b.dataset.ok, "Approved");
+        if (b.dataset.no) decide(b.dataset.no, "Rejected");
+        if (b.dataset.del && confirm("Delete this leave request?")) {
+          EMS.db.leaves = EMS.db.leaves.filter(function (l) { return l.id !== b.dataset.del; });
+          EMS.save(); render(); EMS.toast("Leave request deleted");
+        }
+      });
+      document.getElementById("fStatus").addEventListener("change", render);
+      document.getElementById("addBtn").onclick = openForm;
+      render();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Salary & Payroll · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="toolbar">
+        <select class="select" id="month"></select>
+        <select class="select" id="fDept"></select>
+        <div class="spacer"></div>
+        <button class="btn btn-outline" id="exportBtn"></button>
+        <button class="btn btn-primary" id="payAllBtn"></button>
+      </div>
+      <div class="grid stats" id="stats"></div>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr><th>Employee</th><th class="num">Gross</th><th class="num">Bonus</th><th class="num">LOP days</th><th class="num">Deductions</th><th class="num">Net pay</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+          <tfoot id="foot"></tfoot>
+        </table>
+      </div>
+      <p class="note" style="margin-top:10px">
+        Gross = Basic + HRA + Allowance. Deductions = PF (12% of Basic) + Professional Tax (₹200 if gross ≥ ₹15,000) + Loss of pay (gross ÷ 30 × absent days, half day = ½) + other deductions.
+        Change salary structure from the Employees page.
+      </p>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      if (!EMS.shell("salary", "Salary & Payroll", "Monthly salary, deductions and payslips")) return;
+      var I = EMS.icon, esc = EMS.esc, inr = EMS.inr;
+      document.getElementById("exportBtn").innerHTML = I("download") + "Export CSV";
+      document.getElementById("payAllBtn").innerHTML = I("check") + "Mark all paid";
+      document.getElementById("fDept").innerHTML = EMS.deptOptions("", true);
+
+      var monthEl = document.getElementById("month");
+      var ms = [], d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1);
+      for (var i = 0; i < 13; i++) { ms.push(EMS.ymd(d).slice(0, 7)); d.setMonth(d.getMonth() - 1); }
+      monthEl.innerHTML = ms.map(function (m) { return '<option value="' + m + '"' + (m === EMS.thisMonth() ? " selected" : "") + ">" + EMS.fmtMonth(m) + "</option>"; }).join("");
+
+      function list() {
+        var fd = document.getElementById("fDept").value;
+        return EMS.db.employees.filter(function (e) { return e.status === "Active" && (!fd || e.dept === fd); });
+      }
+
+      function render() {
+        var m = monthEl.value, t = { gross: 0, bonus: 0, ded: 0, net: 0, paid: 0 }, emps = list();
+        document.getElementById("rows").innerHTML = emps.map(function (e) {
+          var s = EMS.salaryFor(e, m);
+          t.gross += s.gross; t.bonus += s.bonus; t.ded += s.deductions; t.net += s.net; if (s.status === "Paid") t.paid++;
+          return "<tr><td>" + EMS.personCell(e) + '</td><td class="num">' + inr(s.gross) + '</td><td class="num">' + (s.bonus ? inr(s.bonus) : "—") +
+            '</td><td class="num">' + s.lopDays + '</td><td class="num">' + inr(s.deductions) + '</td><td class="num"><b>' + inr(s.net) + "</b></td><td>" + EMS.badge(s.status) +
+            (s.paidOn ? '<br><small class="note">' + EMS.fmtDate(s.paidOn) + "</small>" : "") + '</td><td><div class="actions">' +
+            '<button class="icon-btn" data-adj="' + e.id + '" title="Bonus / deductions">' + I("edit") + "</button>" +
+            '<button class="icon-btn" data-slip="' + e.id + '" title="Payslip">' + I("file") + "</button>" +
+            (s.status === "Paid"
+              ? '<button class="btn btn-ghost btn-sm" data-unpay="' + e.id + '">Undo</button>'
+              : '<button class="btn btn-success btn-sm" data-pay="' + e.id + '">Mark paid</button>') +
+            "</div></td></tr>";
+        }).join("") || '<tr><td colspan="8"><div class="empty">No active employees.</div></td></tr>';
+        document.getElementById("foot").innerHTML = emps.length
+          ? '<tr><td>Total (' + emps.length + ')</td><td class="num">' + inr(t.gross) + '</td><td class="num">' + inr(t.bonus) + '</td><td></td><td class="num">' + inr(t.ded) + '</td><td class="num">' + inr(t.net) + "</td><td colspan=\"2\"></td></tr>"
+          : "";
+        document.getElementById("stats").innerHTML =
+          EMS.statCard("Total gross", inr(t.gross), EMS.fmtMonth(m), "rupee", "tone-maroon") +
+          EMS.statCard("Deductions", inr(t.ded), "PF, PT & loss of pay", "file", "tone-saffron") +
+          EMS.statCard("Net payable", inr(t.net), "Including bonus " + inr(t.bonus), "checkCircle", "tone-green") +
+          EMS.statCard("Paid", t.paid + " / " + emps.length, emps.length - t.paid + " pending", "users", "tone-blue");
+      }
+
+      function adjust(id) {
+        var e = EMS.emp(id), m = monthEl.value, s = EMS.salaryFor(e, m);
+        function line(l, v, neg) { return '<div class="list-item"><div class="grow">' + l + "</div><b>" + (neg ? "− " : "") + inr(v) + "</b></div>"; }
+        EMS.modal({
+          title: e.name + " · " + EMS.fmtMonth(m),
+          body: '<div class="grid" style="grid-template-columns:1fr 1fr;gap:20px">' +
+            "<div>" + line("Basic", s.basic) + line("HRA", s.hra) + line("Allowance", s.allowance) + line("<b>Gross</b>", s.gross) + "</div>" +
+            "<div>" + line("PF (12%)", s.pf, 1) + line("Professional tax", s.pt, 1) + line("Loss of pay (" + s.lopDays + " days)", s.lop, 1) + line("Other deductions", s.otherDed, 1) + "</div></div>" +
+            '<form id="adjForm" class="form-grid" style="margin-top:18px">' +
+            '<label class="field">Bonus / incentive (₹)<input class="input" type="number" min="0" name="bonus" value="' + (s.bonus || "") + '" /></label>' +
+            '<label class="field">Other deduction (₹)<input class="input" type="number" min="0" name="otherDed" value="' + (s.otherDed || "") + '" /></label>' +
+            '<label class="field full">Note<input class="input" name="note" value="' + esc(s.note) + '" placeholder="e.g. Advance recovery, Diwali bonus" /></label></form>',
+          footer: '<button class="btn btn-ghost" data-close type="button">Cancel</button><button class="btn btn-primary" type="submit" form="adjForm">Save</button>',
+        });
+        document.getElementById("adjForm").addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          var f = EMS.formData(this);
+          EMS.setPayroll(m, id, { bonus: +f.bonus || 0, otherDed: +f.otherDed || 0, note: f.note });
+          EMS.closeModal(); render(); EMS.toast("Salary updated");
+        });
+      }
+
+      function payslip(id) {
+        var e = EMS.emp(id), m = monthEl.value, s = EMS.salaryFor(e, m), co = EMS.db.company;
+        function r(a, b) { return "<tr><td>" + a + '</td><td style="text-align:right">' + b + "</td></tr>"; }
+        var html = '<!doctype html><html><head><meta charset="utf-8"><title>Payslip - ' + esc(e.name) + " - " + EMS.fmtMonth(m) + "</title>" +
+          "<style>body{font-family:Arial,Helvetica,sans-serif;color:#2a1a14;margin:0;padding:32px;background:#fff}.slip{max-width:760px;margin:auto;border:1px solid #d9c7b0;border-radius:10px;overflow:hidden}" +
+          ".hd{background:#2a120d;color:#fff;padding:22px 26px;display:flex;justify-content:space-between;align-items:center}.hd h1{margin:0;font-family:Georgia,serif;font-size:26px}.hd p{margin:4px 0 0;opacity:.75;font-size:13px}" +
+          ".tag{background:#e8871e;color:#fff;padding:6px 12px;border-radius:6px;font-weight:bold;font-size:13px}.sec{padding:18px 26px;border-bottom:1px solid #ecdfcf}" +
+          ".info{display:grid;grid-template-columns:1fr 1fr;gap:6px 30px;font-size:13.5px}.info b{display:inline-block;min-width:120px;color:#7a675c;font-weight:normal}" +
+          ".cols{display:grid;grid-template-columns:1fr 1fr}.cols>div{padding:18px 26px}.cols>div:first-child{border-right:1px solid #ecdfcf}h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#9a2c1f}" +
+          "table{width:100%;border-collapse:collapse;font-size:14px}td{padding:6px 0}tr.t td{border-top:1px solid #ecdfcf;font-weight:bold;padding-top:10px}" +
+          ".net{padding:20px 26px;background:#fdf0e1;display:flex;justify-content:space-between;align-items:center}.net .v{font-size:26px;font-weight:bold;font-family:Georgia,serif;color:#9a2c1f}.w{font-size:12.5px;color:#7a675c;margin-top:4px}" +
+          ".ft{padding:14px 26px;font-size:11.5px;color:#7a675c;text-align:center}@media print{body{padding:0}.noprint{display:none}}</style></head><body>" +
+          '<div class="noprint" style="text-align:center;margin-bottom:16px"><button onclick="window.print()" style="padding:10px 20px;background:#9a2c1f;color:#fff;border:0;border-radius:8px;font-weight:bold;cursor:pointer">Print / Save as PDF</button></div>' +
+          '<div class="slip"><div class="hd"><div><h1>' + esc(co.name) + "</h1><p>" + esc([co.address, co.phone, co.email].filter(Boolean).join(" · ") || "Salary slip") + '</p></div><div class="tag">Payslip · ' + EMS.fmtMonth(m) + "</div></div>" +
+          '<div class="sec info"><div><b>Employee</b>' + esc(e.name) + "</div><div><b>Employee code</b>" + esc(e.code) + "</div><div><b>Designation</b>" + esc(e.designation) +
+          "</div><div><b>Department</b>" + esc(EMS.deptName(e.dept)) + "</div><div><b>Joining date</b>" + EMS.fmtDate(e.joinDate) + "</div><div><b>PAN</b>" + esc(e.pan || "—") +
+          "</div><div><b>Bank A/c</b>" + esc(e.bank || "—") + "</div><div><b>Days present</b>" + (s.present + s.half * 0.5 + s.leave) + " (LOP " + s.lopDays + ")</div></div>" +
+          '<div class="cols"><div><h3>Earnings</h3><table>' + r("Basic", inr(s.basic)) + r("House rent allowance", inr(s.hra)) + r("Other allowance", inr(s.allowance)) +
+          (s.bonus ? r("Bonus / incentive", inr(s.bonus)) : "") + '<tr class="t"><td>Total earnings</td><td style="text-align:right">' + inr(s.gross + s.bonus) + "</td></tr></table></div>" +
+          "<div><h3>Deductions</h3><table>" + r("Provident fund (12%)", inr(s.pf)) + r("Professional tax", inr(s.pt)) + r("Loss of pay", inr(s.lop)) +
+          (s.otherDed ? r("Other" + (s.note ? " (" + esc(s.note) + ")" : ""), inr(s.otherDed)) : "") + '<tr class="t"><td>Total deductions</td><td style="text-align:right">' + inr(s.deductions) + "</td></tr></table></div></div>" +
+          '<div class="net"><div><b>Net pay</b><div class="w">Rupees ' + EMS.numberToWords(s.net) + ' only</div></div><div class="v">' + inr(s.net) + "</div></div>" +
+          '<div class="ft">Status: ' + s.status + (s.paidOn ? " on " + EMS.fmtDate(s.paidOn) : "") + " · This is a computer-generated payslip and does not need a signature.</div></div></body></html>";
+        var w = window.open("", "_blank");
+        if (!w) { EMS.toast("Please allow pop-ups to view the payslip", "error"); return; }
+        w.document.open(); w.document.write(html); w.document.close();
+      }
+
+      document.getElementById("rows").addEventListener("click", function (ev) {
+        var b = ev.target.closest("button"); if (!b) return;
+        var m = monthEl.value;
+        if (b.dataset.adj) adjust(b.dataset.adj);
+        if (b.dataset.slip) payslip(b.dataset.slip);
+        if (b.dataset.pay) { EMS.setPayroll(m, b.dataset.pay, { status: "Paid", paidOn: EMS.today() }); render(); EMS.toast("Marked as paid"); }
+        if (b.dataset.unpay) { EMS.setPayroll(m, b.dataset.unpay, { status: "Pending", paidOn: "" }); render(); }
+      });
+      document.getElementById("payAllBtn").onclick = function () {
+        var m = monthEl.value, emps = list();
+        if (!emps.length || !confirm("Mark salary as paid for all " + emps.length + " employees for " + EMS.fmtMonth(m) + "?")) return;
+        emps.forEach(function (e) { if (EMS.salaryFor(e, m).status !== "Paid") EMS.setPayroll(m, e.id, { status: "Paid", paidOn: EMS.today() }); });
+        render(); EMS.toast("All salaries marked as paid");
+      };
+      document.getElementById("exportBtn").onclick = function () {
+        var m = monthEl.value;
+        var rows = [["Code", "Name", "Department", "Basic", "HRA", "Allowance", "Gross", "Bonus", "PF", "Professional tax", "LOP days", "Loss of pay", "Other deduction", "Net pay", "Status", "Paid on"]];
+        list().forEach(function (e) {
+          var s = EMS.salaryFor(e, m);
+          rows.push([e.code, e.name, EMS.deptName(e.dept), s.basic, s.hra, s.allowance, s.gross, s.bonus, s.pf, s.pt, s.lopDays, s.lop, s.otherDed, s.net, s.status, s.paidOn]);
+        });
+        EMS.downloadFile("salary-" + m + ".csv", EMS.toCSV(rows), "text/csv");
+      };
+      monthEl.addEventListener("change", render);
+      document.getElementById("fDept").addEventListener("change", render);
+      render();
+    })();
+  </script>
+</body>
+</html>

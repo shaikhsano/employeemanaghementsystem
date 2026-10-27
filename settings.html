@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head"><div><h2>Company details</h2><p>Shown on payslips and the sidebar</p></div></div>
+          <form id="coForm" class="form-grid">
+            <label class="field full">Company name<input class="input" name="name" required /></label>
+            <label class="field full">Address<input class="input" name="address" placeholder="Shop / office address" /></label>
+            <label class="field">Phone<input class="input" name="phone" /></label>
+            <label class="field">Email<input class="input" type="email" name="email" /></label>
+            <div class="full"><button class="btn btn-primary" type="submit">Save company details</button></div>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h2>Admin login</h2><p>Change the username and password</p></div></div>
+          <form id="pwForm" class="form-grid">
+            <label class="field">Display name<input class="input" name="name" required /></label>
+            <label class="field">Username<input class="input" name="username" required autocomplete="username" /></label>
+            <label class="field full">Current password<input class="input" type="password" name="current" required autocomplete="current-password" /></label>
+            <label class="field">New password<input class="input" type="password" name="pw" autocomplete="new-password" placeholder="Leave blank to keep" /></label>
+            <label class="field">Confirm new password<input class="input" type="password" name="pw2" autocomplete="new-password" /></label>
+            <p class="form-error full" id="pwErr"></p>
+            <div class="full"><button class="btn btn-primary" type="submit">Update login</button></div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <div class="card-head"><div><h2>Backup &amp; data</h2><p>All data is saved in this browser. Download a backup regularly.</p></div></div>
+        <div class="toolbar" style="margin:0">
+          <button class="btn btn-outline" id="exportBtn" type="button"></button>
+          <label class="btn btn-outline" style="cursor:pointer"><span id="importLbl"></span><input type="file" id="importFile" accept="application/json" hidden /></label>
+          <div class="spacer"></div>
+          <button class="btn btn-danger" id="resetBtn" type="button"></button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      if (!EMS.shell("settings", "Settings", "Company profile, login and backups")) return;
+      var I = EMS.icon, db = EMS.db;
+      document.getElementById("exportBtn").innerHTML = I("download") + "Download backup";
+      document.getElementById("importLbl").innerHTML = I("upload") + "Restore backup";
+      document.getElementById("importLbl").style.display = "inline-flex";
+      document.getElementById("importLbl").style.gap = "8px";
+      document.getElementById("resetBtn").innerHTML = I("refresh") + "Reset to demo data";
+
+      var co = document.getElementById("coForm");
+      ["name", "address", "phone", "email"].forEach(function (k) { co.elements[k].value = db.company[k] || ""; });
+      co.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        Object.assign(db.company, EMS.formData(this)); EMS.save(); EMS.toast("Company details saved");
+      });
+
+      var pw = document.getElementById("pwForm"), err = document.getElementById("pwErr");
+      pw.elements.name.value = db.admin.name; pw.elements.username.value = db.admin.username;
+      pw.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var f = EMS.formData(this); err.classList.remove("show");
+        function fail(m) { err.textContent = m; err.classList.add("show"); }
+        if (f.current !== db.admin.password) return fail("Current password is incorrect.");
+        if (f.pw && f.pw.length < 6) return fail("New password must be at least 6 characters.");
+        if (f.pw !== f.pw2) return fail("New passwords do not match.");
+        db.admin.name = f.name; db.admin.username = f.username; if (f.pw) db.admin.password = f.pw;
+        EMS.save(); this.reset(); pw.elements.name.value = db.admin.name; pw.elements.username.value = db.admin.username;
+        EMS.toast("Login details updated");
+      });
+
+      document.getElementById("exportBtn").onclick = function () {
+        EMS.downloadFile("shree-balaji-ems-backup-" + EMS.today() + ".json", JSON.stringify(EMS.db, null, 2), "application/json");
+      };
+      document.getElementById("importFile").onchange = function () {
+        var file = this.files[0]; if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+          try {
+            var d = JSON.parse(reader.result);
+            if (!d.employees || !d.admin) throw new Error("bad");
+            if (!confirm("Replace all current data with this backup?")) return;
+            localStorage.setItem(EMS.KEY, JSON.stringify(d));
+            location.reload();
+          } catch (e) { EMS.toast("That file is not a valid backup", "error"); }
+        };
+        reader.readAsText(file);
+      };
+      document.getElementById("resetBtn").onclick = function () {
+        if (confirm("This deletes all your data and restores the demo data. Continue?")) { EMS.reset(); location.reload(); }
+      };
+    })();
+  </script>
+</body>
+</html>

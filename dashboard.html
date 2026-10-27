@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard · Shree Balaji EMS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <section class="content">
+      <div class="grid stats" id="stats"></div>
+
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Attendance — last 7 days</h2><p>Daily count of staff by status</p></div>
+            <div class="legend"><span><i class="c-p"></i>Present</span><span><i class="c-h"></i>Half day</span><span><i class="c-l"></i>Leave</span><span><i class="c-a"></i>Absent</span></div>
+          </div>
+          <div class="chart" id="chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>Department strength</h2><p>Active employees per department</p></div></div>
+          <div id="depts"></div>
+        </div>
+      </div>
+
+      <div class="grid two mt">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Pending leave requests</h2><p>Waiting for your approval</p></div>
+            <a class="btn btn-outline btn-sm" href="leave.html">View all</a>
+          </div>
+          <div id="pending"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Recently joined</h2><p>Newest team members</p></div>
+            <a class="btn btn-outline btn-sm" href="employees.html">All staff</a>
+          </div>
+          <div id="recent"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (function () {
+      var hour = new Date().getHours();
+      var greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+      if (!EMS.shell("dashboard", "Dashboard", greet + " — here is today at a glance")) return;
+      var db = EMS.db, t = EMS.today(), m = EMS.thisMonth();
+      var active = db.employees.filter(function (e) { return e.status === "Active"; });
+      var att = db.attendance[t] || {};
+      var marked = active.filter(function (e) { return att[e.id]; }).length;
+      var present = active.filter(function (e) { return att[e.id] === "P" || att[e.id] === "H"; }).length;
+      var onLeave = active.filter(function (e) { return att[e.id] === "L" || EMS.onLeave(e.id, t); }).length;
+      var payroll = active.reduce(function (s, e) { return s + EMS.salaryFor(e, m).net; }, 0);
+      var pending = db.leaves.filter(function (l) { return l.status === "Pending"; });
+
+      document.getElementById("stats").innerHTML =
+        EMS.statCard("Total employees", active.length, db.employees.length - active.length + " inactive", "users", "tone-maroon") +
+        EMS.statCard("Present today", present, marked ? marked + " of " + active.length + " marked" : '<a href="attendance.html" style="color:var(--primary);font-weight:700">Mark attendance →</a>', "attendance", "tone-green") +
+        EMS.statCard("On leave today", onLeave, pending.length + " request" + (pending.length === 1 ? "" : "s") + " pending", "leave", "tone-blue") +
+        EMS.statCard("Payroll · " + EMS.MONTHS[+m.slice(5) - 1], EMS.inr(payroll), "Net salary this month", "rupee", "tone-saffron");
+
+      // 7-day chart
+      var days = [];
+      for (var i = 6; i >= 0; i--) days.push(EMS.addDays(t, -i));
+      var total = Math.max(active.length, 1);
+      document.getElementById("chart").innerHTML = days.map(function (d) {
+        var map = db.attendance[d] || {}, c = { P: 0, H: 0, L: 0, A: 0 };
+        active.forEach(function (e) { if (c[map[e.id]] != null) c[map[e.id]]++; });
+        var dt = EMS.parseDate(d);
+        var label = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dt.getDay()];
+        function seg(n, cls) { return n ? '<span class="' + cls + '" style="height:' + (n / total) * 100 + '%" title="' + n + '"></span>' : ""; }
+        return '<div class="col"><div class="stack">' + seg(c.P, "c-p") + seg(c.H, "c-h") + seg(c.L, "c-l") + seg(c.A, "c-a") + "</div><small>" + label + "</small></div>";
+      }).join("");
+
+      // departments
+      var max = 1;
+      var counts = db.departments.map(function (d) {
+        var n = active.filter(function (e) { return e.dept === d.id; }).length; max = Math.max(max, n); return [d.name, n];
+      });
+      document.getElementById("depts").innerHTML = counts.map(function (c) {
+        return '<div class="bar-row"><span>' + EMS.esc(c[0]) + '</span><div class="track"><div class="fill" style="width:' + (c[1] / max) * 100 + '%"></div></div><span>' + c[1] + "</span></div>";
+      }).join("") || '<div class="empty">No departments yet</div>';
+
+      // pending leaves
+      document.getElementById("pending").innerHTML = pending.slice(0, 5).map(function (l) {
+        var e = EMS.emp(l.empId);
+        return '<div class="list-item"><div class="avatar sm">' + EMS.esc(EMS.initials(e ? e.name : "?")) + '</div><div class="grow"><b>' + EMS.esc(e ? e.name : "—") + "</b><small>" + EMS.esc(l.type) + " · " + EMS.fmtDate(l.from) + " → " + EMS.fmtDate(l.to) + "</small></div>" + EMS.badge("Pending") + "</div>";
+      }).join("") || '<div class="empty">No pending requests 🎉</div>';
+
+      // recent employees
+      var recent = db.employees.slice().sort(function (a, b) { return a.joinDate < b.joinDate ? 1 : -1; }).slice(0, 5);
+      document.getElementById("recent").innerHTML = recent.map(function (e) {
+        return '<div class="list-item"><div class="avatar sm">' + EMS.esc(EMS.initials(e.name)) + '</div><div class="grow"><b>' + EMS.esc(e.name) + "</b><small>" + EMS.esc(e.designation) + " · " + EMS.esc(EMS.deptName(e.dept)) + '</small></div><span class="note">' + EMS.fmtDate(e.joinDate) + "</span></div>";
+      }).join("") || '<div class="empty">No employees yet</div>';
+    })();
+  </script>
+</body>
+</html>
